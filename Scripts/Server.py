@@ -26,6 +26,7 @@ class commandCMD():
     def commands(self):
         command = input("CMD:")
         self.conn.sendall(command.encode())
+        return None
 
 class server():
     def __init__(self):
@@ -34,6 +35,8 @@ class server():
         self.modeState = 0
         self.scrollUp = False
         self.scrollDown = True
+        self.play_mic = True
+        self.stop_loop = False
         self.data = b""
         self.payload_size = struct.calcsize("Q")
 
@@ -83,7 +86,8 @@ class server():
 
     
     def playMic(self, data):
-        stream.write(data)
+        if self.play_mic:
+            stream.write(data)
 
     # def showScreen(self, frame):
     #     cv2.namedWindow("Image", cv2.WINDOW_NORMAL) 
@@ -100,27 +104,33 @@ class server():
             data = cameraPacket[payload_size:]
             #print("Packed message size:", frame_pack)
         except Exception as err:
-            print("Error: ", err)
+            pass
 
         try:
             pack_size = struct.unpack("Q", frame_pack)[0]
             #print("Unpacked message size:", pack_size)
-        except struct.error as err:
-            print("Error: ", err)
 
-        frame_data = cameraDump[:pack_size]
-        data = cameraDump[pack_size:]
+            frame_data = cameraDump[:pack_size]
+            data = cameraDump[pack_size:]
+        except struct.error as err:
+            pass
         
         try:
             img = pickle.loads(frame_data)
+            self.play_mic = True
             return img
         except Exception as err:
-            print("Pickle Error: ", err)
+            self.play_mic = False
             return None
 
     def processData(self, conn):
         while True:
-            action = conn.recv(1)[0]
+            if self.stop_loop:
+                continue
+            try:
+                action = conn.recv(1)[0]
+            except:
+                continue
 
             if action == 0x01 or action == 0x03:
                 frame_pack_len = conn.recv(1)[0]
@@ -152,15 +162,21 @@ class server():
             elif action == 0x02:
                 mic_packet = conn.recv(2048)
                 self.playMic(mic_packet)
+            
+            elif action == 0x04:
+                msg_len = conn.recv(3)
+                msg_len = (msg_len[0] << 16) + (msg_len[1] << 8) + msg_len[2]
+                msg = conn.recv(msg_len)
+                print(msg)
 
 
     def showCam(self):
         while True:
             if keyboard.is_pressed("t"):
                 self.conn.sendall(b"cmd_packet")
+                self.stop_loop = True
                 commandCMD(self.conn)
-            else:
-                self.conn.sendall(b"start_cam_stream")
+                self.stop_loop = False
 
 if __name__ == "__main__":
     s = server()

