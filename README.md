@@ -1,2 +1,3 @@
-# Remote-Monitor
-Remote Monitor in python 
+# Remote Monitor
+
+A simple python based command line application for device remote management.
